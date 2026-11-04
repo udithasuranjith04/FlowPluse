@@ -638,3 +638,11 @@ button.studio-text-action:hover { background:transparent; color:#bdf5e8; border-
 @media(max-width:720px) { .owner-offline-start { flex-direction:column; align-items:flex-start; } .shift-memory-head { flex-wrap:wrap; } }
 
 .shift-evidence-note { margin:0 0 18px; color:#a3c8c6; font-size:12px; line-height:1.6; }
+
+/* v1.1: optional browser-local context for already discovered camera tiles. */
+.scene-area-label { display:block; font-size:12px; font-weight:650; margin:10px 0 4px; color:#bbded8; }
+.scene-area-select { width:100%; max-width:270px; padding:8px 9px; border-radius:7px; border:1px solid #3b6969; background:#102630; color:#eafffa; font:inherit; font-size:13px; }
+.scene-area-select:focus-visible, .scene-area-reset:focus-visible { outline:2px solid #80e0c8; outline-offset:2px; }
+.scene-area-context { font-size:12px; color:#a8d5d0; margin:7px 0 6px; line-height:1.5; }
+.scene-area-reset { border:1px solid #3b6969; border-radius:7px; background:transparent; color:#c7eae5; padding:7px 11px; cursor:pointer; font:inherit; font-size:12px; margin:12px 0 2px; }
+.scene-area-reset:hover { background:#224141; }

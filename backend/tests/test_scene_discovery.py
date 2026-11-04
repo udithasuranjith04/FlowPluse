@@ -76,3 +76,31 @@ def test_multiple_occupancy_periods_are_not_called_person_visits():
     assert hotspot["occupancy_episodes"] == 2
     assert hotspot["frames_with_people"] == 55
     assert "visit" not in str(hotspot)
+
+
+def test_scene_discovery_restarts_after_gap_or_clock_regression():
+    scene = SceneDiscovery()
+    for second in range(40):
+        scene.step([person(0.35)], [], float(second))
+    assert scene.snapshot()["state"] == "ready"
+    scene.step([person(0.35)], [], 60.0)  # No bridging two separate camera periods.
+    assert scene.snapshot()["state"] == "learning"
+    assert scene.snapshot()["sampled_frames"] == 1
+    scene.step([person(0.35)], [], 59.0)  # Stale/out-of-order sample.
+    assert scene.snapshot()["sampled_frames"] == 1
+    assert scene.snapshot()["state"] == "learning"
+
+
+def test_unhealthy_sample_suspends_hotspots_until_fresh_learning():
+    engine = AutomaticInsights()
+    track = Track("ephemeral", person(0.35), 0, 0)
+    for second in range(40):
+        track.observe(person(0.35), float(second))
+        engine.step([track.detection], [track], float(second), healthy=True, monitoring=True)
+    assert engine.snapshot()["scene_discovery"]["state"] == "ready"
+    engine.step([], [], 40.0, healthy=False, monitoring=True)
+    report = engine.snapshot()["scene_discovery"]
+    assert report["state"] == "learning"
+    assert report["hotspots"] == []
+    engine.step([track.detection], [track], 41.0, healthy=True, monitoring=True)
+    assert engine.snapshot()["scene_discovery"]["sampled_frames"] == 1

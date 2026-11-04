@@ -28,6 +28,19 @@ const pages = [
 function isPeopleSource(status: Status | null) {
   return Boolean(status && status.camera_id.startsWith("local-camera-") && status.detection_target === "person");
 }
+/** Hide a point-in-time count when its underlying inference is not trustworthy.
+ * Historical shift aggregates are intentionally left available and labeled separately.
+ */
+export function currentCountTrusted(status: Status | null): boolean {
+  return Boolean(status && isPeopleSource(status) && status.state === "LIVE" &&
+    status.ai_state === "active" && !status.preview_only && !status.last_error &&
+    !status.view_shift_detected &&
+    status.continuous_frames_verified === true &&
+    (status.quality_flags?.length ?? 0) === 0 &&
+    typeof status.processed_frame_age_seconds === "number" &&
+    Number.isFinite(status.processed_frame_age_seconds) &&
+    status.processed_frame_age_seconds >= 0 && status.processed_frame_age_seconds <= 3);
+}
 function hasLiveFrame(status: Status | null) {
   return Boolean(status?.frame_id && status.ai_state === "active" &&
     (["LIVE", "REPLAY", "SNAPSHOT"].includes(status.state) || status.preview_only || status.state === "PAUSED"));
@@ -172,11 +185,12 @@ function Overview({ status, camera, events, toZones, toEvents, toShift }: {
   const isLive = isPeopleSource(status) && status?.ai_state === "active";
   const auto = isLive ? status?.automatic_insights : null;
   const filtered = isLive && status?.staff_only_region && status.staff_only_region !== "none" && auto?.guest_area_visible != null;
-  const guests = filtered ? auto?.guest_area_visible : isLive ? status?.visible_people : null;
+  const trustedNow = currentCountTrusted(status);
+  const guests = !trustedNow ? null : filtered ? auto?.guest_area_visible : status?.visible_people;
   const trend = auto?.visible_trend;
   const shiftSustainedPeak = auto?.session_summary?.supported_peak_visible;
   const peakNeedsReview = auto?.session_summary?.peak_possible_outlier === true;
-  const paceLabel = !isLive ? "Not live" : ({ warming_up: "Learning", rising: "Rising", steady: "Steady", falling: "Calmer" }[trend || "warming_up"]);
+  const paceLabel = !isLive ? "Not live" : !trustedNow ? "Checking signal" : ({ warming_up: "Learning", rising: "Rising", steady: "Steady", falling: "Calmer" }[trend || "warming_up"]);
   const liveSignals = deriveServiceSignals(status, events);
   const attention = liveSignals.find((signal) => signal.level === "attention");
   const moved = Boolean(status?.view_shift_detected || status?.quality_flags?.includes("camera_view_moving"));
@@ -184,9 +198,9 @@ function Overview({ status, camera, events, toZones, toEvents, toShift }: {
   return <div className="owner-page">
     <header className="owner-page-heading owner-overview-heading"><div><span className="owner-eyebrow">YOUR CAFÉ, RIGHT NOW</span><h1>Know your floor at a glance.</h1><p>Live people counts, automatic alerts and useful shift patterns—all measured locally.</p></div><span className={`owner-context-chip ${isLive ? "is-live" : ""}`}><span className="pulse-dot"/>{isLive ? status?.preview_only ? "Camera preview" : "Monitoring live" : "Awaiting camera"}</span></header>
     <div className="owner-summary-grid owner-overview-metrics">
-      <div className="owner-summary-card owner-summary-emphasis"><Users size={20}/><span>{filtered ? "People in guest-facing area" : "People in camera view"}</span><strong>{guests ?? "—"}</strong><small>{filtered ? `Full camera: ${status?.visible_people ?? "—"} people · not verified customers` : "Includes staff · not a customer count"}</small></div>
+      <div className="owner-summary-card owner-summary-emphasis"><Users size={20}/><span>{filtered ? "People visible now · guest area" : "People visible now · full camera"}</span><strong>{guests ?? "—"}</strong><small>{!trustedNow ? "Waiting for a verified, recent AI sample" : filtered ? `Full camera now: ${status?.visible_people ?? "—"} · not verified customers` : "Includes staff · not a customer count"}</small></div>
       <div className="owner-summary-card"><Activity size={20}/><span>Current activity</span><strong>{paceLabel}</strong><small>A simple camera-view indicator, not an occupancy limit</small></div>
-      <div className="owner-summary-card"><TrendingUpIcon/><span>Sustained high count</span><strong>{shiftSustainedPeak ?? "Learning"}</strong><small>{peakNeedsReview ? "A larger one-frame count needs review" : "Median across five nearby AI samples · estimate"}</small></div>
+      <div className="owner-summary-card"><TrendingUpIcon/><span>Highest sustained count this shift</span><strong>{shiftSustainedPeak ?? "Learning"}</strong><small>{peakNeedsReview ? "A larger one-frame count needs review" : "Median across five nearby AI samples · estimate"}</small></div>
     </div>
     {isLive && moved && <div className="studio-warning" role="status">The camera viewpoint changed during this session. Scene evidence was restarted, and this shift will not be saved as a historical comparison. For meaningful insights, restart with a fixed camera.</div>}
     {isLive && <div className="guest-area-callout"><ShieldCheck size={17}/><span>{filtered ? "Staff-only side excluded from the guest-area estimate. This does not identify customers." : "AI learns repeated activity locations automatically. The camera cannot verify who is staff or a customer."}</span><button onClick={toZones}>{filtered ? "Change area" : "View AI scene map"} <ArrowRight size={14}/></button></div>}

@@ -43,6 +43,23 @@ def evaluate(rows: list[dict[str, str]]) -> dict[str, float | int]:
     }
 
 
+SCENARIOS = {"clear", "crowded", "occluded", "low_light", "other"}
+
+
+def scenario_breakdown(rows: list[dict[str, str]]) -> dict[str, dict[str, float | int]]:
+    """Optional, human-labeled scene slices; no guesswork from image pixels.
+
+    Counts from small slices are descriptive, NOT a population accuracy estimate.
+    """
+    slices: dict[str, list[dict[str, str]]] = {}
+    for line, row in enumerate(rows, start=2):
+        label = (row.get("scenario") or "").strip().lower()
+        if label not in SCENARIOS:
+            raise ValueError(f"Row {line}: scenario must be one of {', '.join(sorted(SCENARIOS))}")
+        slices.setdefault(label, []).append(row)
+    return {label: evaluate(group) for label, group in sorted(slices.items())}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -58,18 +75,21 @@ def main() -> int:
                 "detected_people",
             }.issubset(reader.fieldnames):
                 raise ValueError("Required columns: frame_id,reference_people,detected_people")
-            result = evaluate(list(reader))
+            rows = list(reader)
+            result = evaluate(rows)
+            slices = scenario_breakdown(rows) if "scenario" in reader.fieldnames else None
     except (OSError, ValueError) as exc:
         parser.error(str(exc))
-    print(
-        json.dumps(
-            {
-                "scope": "Visible people per annotated frame, not tracking or entries/exits",
-                **result,
-            },
-            indent=2,
+    output: dict[str, object] = {
+        "scope": "Visible people per annotated frame, not tracking or entries/exits",
+        **result,
+    }
+    if slices is not None:
+        output["scenario_slices"] = slices
+        output["slice_warning"] = (
+            "Small or uneven scene slices are descriptive only; report frame counts with errors."
         )
-    )
+    print(json.dumps(output, indent=2))
     return 0
 
 

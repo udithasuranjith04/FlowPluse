@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "flowpulse-ai"
-version = "1.0.0"
+version = "1.1.0"
 description = "Local-first privacy-preserving people flow and occupancy analytics"
 requires-python = ">=3.12"
 license = "AGPL-3.0-or-later"

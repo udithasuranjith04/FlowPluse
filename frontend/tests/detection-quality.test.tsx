@@ -42,7 +42,7 @@ it("uses sustained high counts for the owner while exposing raw spikes honestly"
     } },
   } as unknown as Status;
   render(<CafeShift status={status} onCamera={() => {}} />);
-  expect(screen.getByText("Sustained high count")).toBeInTheDocument();
+  expect(screen.getByText("Highest sustained count this shift")).toBeInTheDocument();
   expect(screen.getByText("6")).toBeInTheDocument();
   expect(screen.getByText(/Raw single-frame maximum: 19/)).toBeInTheDocument();
   expect(screen.getByText(/duplicate or false detection/)).toBeInTheDocument();

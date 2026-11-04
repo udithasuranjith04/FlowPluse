@@ -176,6 +176,16 @@ The Live Café and Shift Summary now distinguish *sustained high visible counts*
 
 A local, optional comparison utility can evaluate different **already installed** YOLO weights against annotated people boxes or human-counted snapshots. It never uploads video or changes the active model by itself. See [Detection Quality & Trust](docs/CAFE_DETECTION_QUALITY_TRUST.md).
 
+## v1.1 — café reliability and interpretation (release candidate)
+
+- **Verified-now count:** the live headline shows `—` instead of an old people count when the processed AI frame is stale, unhealthy, or the camera is not verified. Historical shift counts remain clearly labeled as history.
+- **Count labels:** *People visible now*, *Highest sustained count this shift*, and *Average visible this shift* deliberately describe different time windows.
+- **Owner-confirmed hotspot labels:** optionally identify a discovered image tile as seating, counter, entrance/walkway, or other. Labels stay in this browser for that camera; they do not train the detector or classify people. Confirmed seating is not reported as a low-movement service hint. Clear labels after camera repositioning; a detected view change automatically clears them.
+- **Interrupted-scene reset:** learned hotspot evidence is invalidated on unhealthy, stale, or out-of-order monitoring samples, rather than bridging disconnected periods.
+- **More useful *offline* accuracy checks:** an optional `scenario` column on the human-counted CSV produces separate count-error slices for clear, crowded, occluded, low-light, or other frames. No accuracy percentage is claimed until real ground truth is supplied.
+
+See [v1.1 validation and acceptance](docs/CAFE_V11_VALIDATION.md) and [release notes](docs/RELEASE_NOTES_V1_1.md). This version is **not** a certified counter, queue detector, or commercial guarantee.
+
 ## Portfolio release and demonstration
 
 FlowPulse is a **portfolio/research prototype**, not a field-validated or certified people counter. A replayed café video processed through OBS is **live AI inference on prerecorded footage**, not a live customer installation. Publish only footage and screenshots you have explicit rights to share. No results from a manually annotated field evaluation have been supplied with this repository.

@@ -81,7 +81,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             pipeline.digitraffic.http.close()
             store.close()
 
-    app = FastAPI(title="FlowPulse AI", version="1.0.0", lifespan=lifespan)
+    app = FastAPI(title="FlowPulse AI", version="1.1.0", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.origins,
@@ -150,7 +150,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/health")
     def health():
-        return {"status": "ok", "version": "1.0.0"}
+        return {"status": "ok", "version": "1.1.0"}
 
     @app.get("/api/system/status")
     def status():
@@ -160,7 +160,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def public_config():
         return {
             "name": "FlowPulse AI",
-            "version": "1.0.0",
+            "version": "1.1.0",
             "local_only": True,
             "digitraffic_enabled": settings.digitraffic_enabled,
             "evidence_enabled": settings.save_evidence,

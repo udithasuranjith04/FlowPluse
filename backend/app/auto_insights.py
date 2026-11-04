@@ -66,6 +66,7 @@ class AutomaticInsights:
         if not healthy:
             # Do not bridge an unhealthy interval when asking for five nearby
             # healthy observations to support a high count.
+            self.scene_discovery.interrupt()
             self.supported_count_peak.recent.clear()
             self.supported_guest_peak.recent.clear()
             self.crossing_states.clear()
