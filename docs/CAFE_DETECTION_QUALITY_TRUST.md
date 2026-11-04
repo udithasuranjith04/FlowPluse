@@ -7,7 +7,7 @@ This release improves *measurement honesty*, not person identification or guaran
 - **Current people in view** is the number of current-frame person boxes admitted by the existing evidence gate. It can miss people behind pillars or furniture, double-count occluded figures, or include staff.
 - **Sustained high count** is the highest median of five consecutive *healthy monitoring-frame counts*, not a certified occupancy limit. This prevents a single isolated high sample from dominating the owner dashboard; it does not prove that a high count is correct. The original **raw maximum** remains visible in Shift Summary notes and System Health.
 - **Close-up proposals suppressed** counts same-frame detection boxes merged as likely duplicates. It is *not* false-positive precision. Nearby people who overlap heavily can still be difficult to distinguish.
-- **Sampled green boxes** are positions from the last YOLO sample. On the smooth video, they use an inference-cadence-aware expiry capped at 1.8 seconds. A recently missed person may briefly appear as a faint, dashed amber **unverified last-seen hint**; this never changes counts or alerts. Boxes are **not** tracked on every video frame. Status updates are more frequent, but model inference workload is unchanged.
+- **Sampled green boxes** are positions from the last YOLO sample. On the smooth video, the v1.1 browser keeps the solid box steady for a bounded period between recent AI samples instead of fading on every timer tick. A missed or delayed sample may briefly appear as a dashed amber **unverified last-seen hint**; this never changes counts or alerts. Boxes are **not** tracked on every video frame. Status updates are more frequent, but model inference workload is unchanged.
 - **Model choice** stays YOLO11n until you test a larger model on your Mac against human-checked sample frames. The software never automatically downloads or switches weights.
 
 ## Collect ground-truth samples ethically
@@ -57,7 +57,7 @@ Only if a candidate offers meaningful measured gain at acceptable latency should
 
 1. `make lint`, `make test`, `make build` pass on your actual Mac. These tests do **not** validate recognition accuracy.
 2. Confirm that the OBS Virtual Camera source is selected by name. Video should remain smooth when toggling green boxes. Count estimates must never be presented as verified customer totals.
-3. Compare the same person positions in video and sampled overlays. Fast movers may still move between the model's ~2 FPS samples; old coordinates should fade and disappear rather than linger.
+3. Compare the same person positions in video and sampled overlays. Fast movers may still move between the model's ~2 FPS samples; stale coordinates must become unverified amber hints and then disappear, rather than linger as confirmed green boxes.
 4. Check System Health for close-up proposals added/suppressed and raw peak versus sustained high. Compare a known count manually with the displayed *current* count at the same moment.
 5. Use only footage with redistribution rights and disclose **"Prototype demonstration using prerecorded café footage"**. Live **processing** of prerecorded video does not mean live customers at an operating café.
 

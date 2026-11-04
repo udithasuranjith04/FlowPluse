@@ -73,3 +73,12 @@ Don't claim those without separate ground-truth labels and protocols.
 - [ ] Publish a public `v1.0.0` GitHub release **only after** the above steps pass or unverified aspects are clearly disclosed as limitations.
 
 Passing the included tests only proves that selected software contracts hold. It does **not** certify café accuracy, customer classification, production security, or business ROI.
+
+## Additional v1.1 acceptance checks
+
+- [ ] Compare the three different time windows: **People visible now** (fresh frame), **Highest sustained count this shift** (median of nearby observations), and **Average visible this shift** (shift average).
+- [ ] Pull OBS virtual camera while monitoring; confirm the current count becomes unavailable rather than showing an old value.
+- [ ] Verify a human-labeled **seating** tile produces no low-motion service suggestion; compare an unlabeled and counter-labeled tile without interpreting either as a queue.
+- [ ] Verify scene labels clear on view movement and via the clear control; they must not identify individuals.
+- [ ] Run real, same-frame annotated count evaluation including at least clear and occluded frames if available. No accuracy claim before measuring. Follow [v1.1 validation](CAFE_V11_VALIDATION.md).
+- [ ] Confirm the upgrade passes Mac `make lint && make test && make build`, and review GitHub Actions before tagging **v1.1.0**.

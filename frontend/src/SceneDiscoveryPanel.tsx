@@ -1,4 +1,7 @@
+import { useEffect, useState } from "react";
 import { Activity, BrainCircuit, Coffee, Footprints, ShieldCheck, Timer } from "lucide-react";
+import { clearSceneTags, readSceneTags, SCENE_AREAS, sceneAreaGuidance, writeSceneTag } from "./sceneContext";
+import type { SceneArea, SceneTags } from "./sceneContext";
 import type { SceneDiscovery, SceneHotspot, Status } from "./types";
 
 const descriptions: Record<SceneHotspot["pattern"], { label: string; detail: string; Icon: typeof Activity }> = {
@@ -20,6 +23,15 @@ const descriptions: Record<SceneHotspot["pattern"], { label: string; detail: str
 };
 
 export function SceneDiscoveryPanel({ status, compact = false }: { status: Status | null; compact?: boolean }) {
+  const cameraId = status?.camera_id;
+  const [areaTags, setAreaTags] = useState<SceneTags>(() => readSceneTags(cameraId));
+  useEffect(() => { setAreaTags(readSceneTags(cameraId)); }, [cameraId]);
+  useEffect(() => {
+    if (status?.view_shift_detected) {
+      clearSceneTags(cameraId);
+      setAreaTags({});
+    }
+  }, [cameraId, status?.view_shift_detected]);
   const live = status?.detection_target === "person" && status.ai_state === "active" && !status.preview_only && status.state === "LIVE";
   const viewChanged = Boolean(status?.view_shift_detected);
   const scene: SceneDiscovery | null = live && !viewChanged && status ? status.automatic_insights?.scene_discovery ?? null : null;
@@ -45,15 +57,21 @@ export function SceneDiscoveryPanel({ status, compact = false }: { status: Statu
         <strong>How to read this</strong>
         <span>Boxes show areas of recurring visibility or motion—not tables, customer groups, or service queues.</span>
         {scene && <span>{Math.round(scene.window_seconds)} seconds of recent monitoring · {scene.sampled_frames} processed frames</span>}
-        <span>One fixed view is required for meaningful comparisons.</span>
+        <span>One fixed view is required. Confirmed area labels are kept only in this browser and do not change AI predictions.</span>
       </div></div>
       <div className="scene-discovery-findings">
         {ready ? suggestions.map((item, index) => {
           const { label, detail, Icon } = descriptions[item.pattern];
+          const area = areaTags[item.id] ?? "unassigned";
           return <article className="scene-finding" key={item.id}>
             <div className="scene-finding-icon"><Icon size={17}/></div>
             <div><div className="scene-finding-title"><strong>{index + 1}. {label}</strong><span>{item.evidence === "strong" ? "Well sampled" : "Emerging"}</span></div>
               <small>{item.location}</small><p>{detail}</p>
+              <label className="scene-area-label" htmlFor={`scene-area-${item.id}`}>What is this part of your café?</label>
+              <select id={`scene-area-${item.id}`} className="scene-area-select" value={area} onChange={(event) => setAreaTags(writeSceneTag(cameraId, item.id, event.target.value as SceneArea))}>
+                {SCENE_AREAS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+              <p className="scene-area-context">{sceneAreaGuidance(area, item.pattern)}</p>
               <span className="scene-evidence">Seen in {item.frames_with_people} sampled frames · {item.visible_now} visible here now</span>
               {item.observed_seconds != null && <span className="scene-evidence-secondary">Visible for approximately {item.observed_seconds.toFixed(0)}s of this sample · {item.occupancy_episodes ?? "—"} occupancy periods, not distinct visits</span>}
             </div>
@@ -64,6 +82,7 @@ export function SceneDiscoveryPanel({ status, compact = false }: { status: Statu
         </div>}
       </div>
     </div>
-    <div className="scene-discovery-foot"><ShieldCheck size={17}/><p>These are activity hotspots, <strong>not automatic staff/customer recognition</strong>. One person appearing in many frames is not repeat visitors. No clothing, faces or identities are used. A longer stay does not prove a queue or waiting time.</p></div>
+    {cameraId && Object.keys(areaTags).length > 0 && <button className="scene-area-reset" type="button" onClick={() => { clearSceneTags(cameraId); setAreaTags({}); }}>Clear my area labels</button>}
+    <div className="scene-discovery-foot"><ShieldCheck size={17}/><p>These are activity hotspots, <strong>not automatic staff/customer recognition</strong>. One person appearing in many frames is not repeat visitors. No clothing, faces or identities are used. A longer stay does not prove a queue or waiting time. You can label a location manually; labels never classify people and must be cleared if the camera angle changes.</p></div>
   </section>;
 }

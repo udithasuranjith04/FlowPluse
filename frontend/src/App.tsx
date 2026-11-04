@@ -13,6 +13,8 @@ import { SceneDiscoveryPanel } from "./SceneDiscoveryPanel";
 import { deriveServiceSignals, ServiceAlertsPage, ServiceSignalList, useDesktopAlerts } from "./ServiceAlerts";
 import { StartupScreen } from "./StartupScreen";
 import { useLive } from "./useLive";
+import { emptyOverlayMemory, presentOverlays, reconcileOverlaySample } from "./overlayPresentation";
+import type { OverlayMemory } from "./overlayPresentation";
 import ZoneEditor from "./ZoneEditor";
 import type { Camera as CameraType, EventPage, Observation, Review, Status } from "./types";
 
@@ -27,6 +29,19 @@ const pages = [
 ] as const;
 function isPeopleSource(status: Status | null) {
   return Boolean(status && status.camera_id.startsWith("local-camera-") && status.detection_target === "person");
+}
+/** Hide a point-in-time count when its underlying inference is not trustworthy.
+ * Historical shift aggregates are intentionally left available and labeled separately.
+ */
+export function currentCountTrusted(status: Status | null): boolean {
+  return Boolean(status && isPeopleSource(status) && status.state === "LIVE" &&
+    status.ai_state === "active" && !status.preview_only && !status.last_error &&
+    !status.view_shift_detected &&
+    status.continuous_frames_verified === true &&
+    (status.quality_flags?.length ?? 0) === 0 &&
+    typeof status.processed_frame_age_seconds === "number" &&
+    Number.isFinite(status.processed_frame_age_seconds) &&
+    status.processed_frame_age_seconds >= 0 && status.processed_frame_age_seconds <= 3);
 }
 function hasLiveFrame(status: Status | null) {
   return Boolean(status?.frame_id && status.ai_state === "active" &&
@@ -43,68 +58,51 @@ export function ModeBadge({ mode, synthetic = false, currentSnapshot = false, lo
   return <span className={`studio-state state-${mode.toLowerCase()}`}><span className="pulse-dot"/>{label}</span>;
 }
 
-/**
- * Time-bound visual presentation of sampled AI positions (not interpolation
- * through video frames). Allow roughly two inference periods for a variable
- * model cadence, including bounded processing delay, but never hold an old
- * box indefinitely when the backend is slow or disconnected.
- */
-export function sampledBoxOpacity(
-  ageSeconds: number, processedFps = 2, processingDelayMs = 0,
-): number {
-  if (!Number.isFinite(ageSeconds) || ageSeconds < 0) return 0;
-  const cadence = Number.isFinite(processedFps) && processedFps > 0
-    ? 1 / processedFps : 0.5;
-  const delay = Number.isFinite(processingDelayMs) && processingDelayMs > 0
-    ? Math.min(0.65, processingDelayMs / 1000) : 0;
-  const expiry = Math.min(1.8, Math.max(1.0, cadence * 1.8 + delay));
-  if (ageSeconds >= expiry) return 0;
-  const fadeStart = Math.max(0.35, expiry - 0.55);
-  if (ageSeconds <= fadeStart) return 0.95;
-  return 0.95 * (expiry - ageSeconds) / (expiry - fadeStart);
-}
-
-/** A single lost sample is shown as an explicitly unverified visual hint. */
-export function heldBoxOpacity(ageSeconds: number, missedAgeSeconds: number): number {
-  const totalAge = ageSeconds + missedAgeSeconds;
-  if (!Number.isFinite(totalAge) || totalAge < 0 || totalAge >= 1.1) return 0;
-  return 0.32 * Math.min(1, (1.1 - totalAge) / 0.55);
-}
-
 export function LivePreview({ status, camera }: { status: Status | null; camera?: CameraType }) {
   const frame = useRef<HTMLDivElement>(null);
   const [overlays, setOverlays] = useState(true);
   const [retry, setRetry] = useState(0);
   const [failed, setFailed] = useState(false);
   const [renderClock, setRenderClock] = useState(() => Date.now());
+  const [overlayMemory, setOverlayMemory] = useState<OverlayMemory>(emptyOverlayMemory);
   const fresh = hasLiveFrame(status) && isPeopleSource(status);
   const smooth = fresh && status?.camera_id.startsWith("local-camera-") && status.state === "LIVE";
-  // MJPEG video and AI samples have separate clocks. The sampled overlays
-  // use a bounded, cadence-aware fade and are never a live video tracker.
+  // MJPEG video and AI samples have separate clocks. Keep last confirmed
+  // coordinates steady, then switch to a bounded unverified amber hint.
   useEffect(() => {
     if (!smooth || !overlays) return;
     const ticker = window.setInterval(() => setRenderClock(Date.now()), 100);
     return () => window.clearInterval(ticker);
   }, [smooth, overlays]);
-  const sampleTime = status?.frame_timestamp ? Date.parse(status.frame_timestamp) : NaN;
-  const sampleAge = Number.isFinite(sampleTime) && sampleTime > 0
-    ? Math.max(0, (renderClock - sampleTime) / 1000)
-    : status?.processed_frame_age_seconds ?? Infinity;
-  const boxOpacity = sampledBoxOpacity(sampleAge, status?.processed_fps, status?.processing_delay_ms ?? 0);
   const legacy = Boolean(status && (status.camera_id === "demo" || status.detection_target !== "person"));
   const width = status?.resolution?.[0] || 1280;
   const height = status?.resolution?.[1] || 720;
-  // Last-observed outlines remain strictly visual. Analytics and counts
-  // continue to use only detections in the latest processed frame.
-  const overlaySource: { id: string; box: number[]; confidence: number; held?: boolean; held_age_seconds?: number }[] =
-    status?.overlay_tracks ?? status?.tracks ?? [];
-  const boxes = smooth && overlays
-    ? overlaySource.filter((track) =>
-      (track.held ? heldBoxOpacity(sampleAge, track.held_age_seconds ?? Infinity) > 0 : boxOpacity > 0) &&
-      track.box.length === 4 &&
-      track.box.every((value) => Number.isFinite(value) && value >= 0 && value <= 1) &&
-      track.box[2] > track.box[0] && track.box[3] > track.box[1]
-    ).slice(0, 32)
+  const sourceKey = `${status?.camera_id ?? ""}:${status?.control_revision ?? 0}`;
+  const sampleKey = status?.frame_timestamp
+    ? `${status.frame_timestamp}:${status.frame_id ?? ""}` : status?.frame_id ?? "";
+  const sampleTime = status?.frame_timestamp ? Date.parse(status.frame_timestamp) : NaN;
+  const captureTime = Number.isFinite(sampleTime)
+    ? sampleTime : Date.now() - (status?.processed_frame_age_seconds ?? Infinity) * 1000;
+  // Repeated WebSocket updates of the *same* inference are not fresh evidence.
+  // The visual layer is separate from all backend counts and shift measurements.
+  useEffect(() => {
+    if (!smooth || !overlays || !status || status.last_error ||
+        !status.frame_id || status.ai_state !== "active" ||
+        (status.processed_frame_age_seconds ?? Infinity) > 3 ||
+        (status.quality_flags ?? []).some((flag) =>
+          ["camera_view_moving", "camera_movement", "frozen_input", "source_boundary", "frame_gap"].includes(flag))) {
+      setOverlayMemory(emptyOverlayMemory());
+      return;
+    }
+    setOverlayMemory((old) => reconcileOverlaySample(old, {
+      source: sourceKey, sample: sampleKey, capturedAtMs: captureTime,
+      tracks: status.overlay_tracks ?? status.tracks ?? [],
+    }, Date.now()));
+  }, [smooth, overlays, status, sourceKey, sampleKey, captureTime]);
+  const boxes = smooth && overlays && status?.ai_state === "active" && !status.last_error &&
+    (status.processed_frame_age_seconds ?? Infinity) <= 3
+    ? presentOverlays(overlayMemory.source === sourceKey ? overlayMemory : emptyOverlayMemory(),
+      renderClock, status?.processed_fps, status?.processing_delay_ms ?? 0)
     : [];
   return <section className="studio-card camera-stage" aria-label="Live camera preview">
     <div className="stage-heading"><div><span className="section-kicker">LIVE / VISION</span><h2>Camera workspace</h2></div>
@@ -119,19 +117,18 @@ export function LivePreview({ status, camera }: { status: Status | null; camera?
           alt={`Live person-detection camera ${camera?.name || status!.camera_id}`}
           onLoad={() => setFailed(false)} onError={() => setFailed(true)} />
         {boxes.length > 0 && <svg className="stage-ai-boxes" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="xMidYMid meet" aria-label="Latest sampled AI detection boxes">
-          {boxes.map((track, index) => {
+          {boxes.map((track) => {
             const [x1, y1, x2, y2] = track.box;
             const x = x1 * width;
             const y = y1 * height;
-            return <g key={track.id || index} opacity={track.held
-              ? heldBoxOpacity(sampleAge, track.held_age_seconds ?? Infinity) : boxOpacity}>
+            return <g key={track.visualId} opacity={track.state === "confirmed" ? 0.95 : 0.58}>
               <rect x={x} y={y} width={(x2 - x1) * width} height={(y2 - y1) * height}
-                fill="none" stroke={track.held ? "#f6c57c" : "#70e6d1"}
-                strokeDasharray={track.held ? "10 7" : undefined}
+                fill="none" stroke={track.state === "last-seen" ? "#f6c57c" : "#70e6d1"}
+                strokeDasharray={track.state === "last-seen" ? "10 7" : undefined}
                 strokeWidth={Math.max(2, width / 500)} />
-              <text x={x + 4} y={Math.max(18, y - 6)} fill={track.held ? "#f6d6a4" : "#c0ffed"}
+              <text x={x + 4} y={Math.max(18, y - 6)} fill={track.state === "last-seen" ? "#f6d6a4" : "#c0ffed"}
                 fontSize={Math.max(14, width / 80)} fontWeight="600">
-                {track.held ? "last seen · not verified" : "person · sampled"}
+                {track.state === "last-seen" ? "last seen · not verified" : "person · sampled"}
               </text>
             </g>;
           })}
@@ -172,11 +169,12 @@ function Overview({ status, camera, events, toZones, toEvents, toShift }: {
   const isLive = isPeopleSource(status) && status?.ai_state === "active";
   const auto = isLive ? status?.automatic_insights : null;
   const filtered = isLive && status?.staff_only_region && status.staff_only_region !== "none" && auto?.guest_area_visible != null;
-  const guests = filtered ? auto?.guest_area_visible : isLive ? status?.visible_people : null;
+  const trustedNow = currentCountTrusted(status);
+  const guests = !trustedNow ? null : filtered ? auto?.guest_area_visible : status?.visible_people;
   const trend = auto?.visible_trend;
   const shiftSustainedPeak = auto?.session_summary?.supported_peak_visible;
   const peakNeedsReview = auto?.session_summary?.peak_possible_outlier === true;
-  const paceLabel = !isLive ? "Not live" : ({ warming_up: "Learning", rising: "Rising", steady: "Steady", falling: "Calmer" }[trend || "warming_up"]);
+  const paceLabel = !isLive ? "Not live" : !trustedNow ? "Checking signal" : ({ warming_up: "Learning", rising: "Rising", steady: "Steady", falling: "Calmer" }[trend || "warming_up"]);
   const liveSignals = deriveServiceSignals(status, events);
   const attention = liveSignals.find((signal) => signal.level === "attention");
   const moved = Boolean(status?.view_shift_detected || status?.quality_flags?.includes("camera_view_moving"));
@@ -184,9 +182,9 @@ function Overview({ status, camera, events, toZones, toEvents, toShift }: {
   return <div className="owner-page">
     <header className="owner-page-heading owner-overview-heading"><div><span className="owner-eyebrow">YOUR CAFÉ, RIGHT NOW</span><h1>Know your floor at a glance.</h1><p>Live people counts, automatic alerts and useful shift patterns—all measured locally.</p></div><span className={`owner-context-chip ${isLive ? "is-live" : ""}`}><span className="pulse-dot"/>{isLive ? status?.preview_only ? "Camera preview" : "Monitoring live" : "Awaiting camera"}</span></header>
     <div className="owner-summary-grid owner-overview-metrics">
-      <div className="owner-summary-card owner-summary-emphasis"><Users size={20}/><span>{filtered ? "People in guest-facing area" : "People in camera view"}</span><strong>{guests ?? "—"}</strong><small>{filtered ? `Full camera: ${status?.visible_people ?? "—"} people · not verified customers` : "Includes staff · not a customer count"}</small></div>
+      <div className="owner-summary-card owner-summary-emphasis"><Users size={20}/><span>{filtered ? "People visible now · guest area" : "People visible now · full camera"}</span><strong>{guests ?? "—"}</strong><small>{!trustedNow ? "Waiting for a verified, recent AI sample" : filtered ? `Full camera now: ${status?.visible_people ?? "—"} · not verified customers` : "Includes staff · not a customer count"}</small></div>
       <div className="owner-summary-card"><Activity size={20}/><span>Current activity</span><strong>{paceLabel}</strong><small>A simple camera-view indicator, not an occupancy limit</small></div>
-      <div className="owner-summary-card"><TrendingUpIcon/><span>Sustained high count</span><strong>{shiftSustainedPeak ?? "Learning"}</strong><small>{peakNeedsReview ? "A larger one-frame count needs review" : "Median across five nearby AI samples · estimate"}</small></div>
+      <div className="owner-summary-card"><TrendingUpIcon/><span>Highest sustained count this shift</span><strong>{shiftSustainedPeak ?? "Learning"}</strong><small>{peakNeedsReview ? "A larger one-frame count needs review" : "Median across five nearby AI samples · estimate"}</small></div>
     </div>
     {isLive && moved && <div className="studio-warning" role="status">The camera viewpoint changed during this session. Scene evidence was restarted, and this shift will not be saved as a historical comparison. For meaningful insights, restart with a fixed camera.</div>}
     {isLive && <div className="guest-area-callout"><ShieldCheck size={17}/><span>{filtered ? "Staff-only side excluded from the guest-area estimate. This does not identify customers." : "AI learns repeated activity locations automatically. The camera cannot verify who is staff or a customer."}</span><button onClick={toZones}>{filtered ? "Change area" : "View AI scene map"} <ArrowRight size={14}/></button></div>}

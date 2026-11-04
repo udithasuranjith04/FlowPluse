@@ -39,8 +39,22 @@ class SceneDiscovery:
     def reset(self) -> None:
         self.frames: deque[SceneSample] = deque(maxlen=MAX_FRAMES)
         self.last_frame_counts = [0] * CELLS
+        self.interrupted = False
+
+    def interrupt(self) -> None:
+        """Invalidate patterns without misrepresenting old data as current.
+
+        Keep sample counts available for diagnostics until the next healthy frame;
+        a new sample starts a new learning window.
+        """
+        self.interrupted = True
+        self.last_frame_counts = [0] * CELLS
 
     def step(self, detections: list[Detection], tracks: list[Track], now: float) -> None:
+        if self.interrupted or (
+            self.frames and (now <= self.frames[-1].at or now - self.frames[-1].at > 3.0)
+        ):
+            self.reset()
         presence = [0] * CELLS
         stationary = [0] * CELLS
         moving = [0] * CELLS
@@ -79,7 +93,7 @@ class SceneDiscovery:
                 slow[cell] += sample.stationary[cell]
                 movement[cell] += sample.moving[cell]
         all_presence = sum(total_presence)
-        ready = n >= 36 and span >= 15.0 and all_presence >= 30
+        ready = not self.interrupted and n >= 36 and span >= 15.0 and all_presence >= 30
         hotspots: list[dict] = []
         if ready:
             candidates = sorted(

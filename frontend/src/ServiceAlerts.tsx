@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, ArrowRight, Bell, BellOff, CheckCircle2, CircleAlert, Eye, ShieldCheck } from "lucide-react";
 import type { Observation, Status } from "./types";
+import { readSceneTags } from "./sceneContext";
 
 export interface ServiceSignal {
   id: string;
@@ -54,12 +55,17 @@ export function deriveServiceSignals(status: Status | null, events: Observation[
   const discoveredStays = status.automatic_insights?.scene_discovery?.hotspots.find(
     (item) => item.pattern === "longer_stays" && item.evidence === "strong",
   );
-  if (discoveredStays) {
+  // Owner-confirmed seating is expected low movement, not an operational signal.
+  // A context label never upgrades a movement pattern into an automatic queue alert.
+  const confirmedArea = discoveredStays ? readSceneTags(status.camera_id)[discoveredStays.id] : undefined;
+  if (discoveredStays && confirmedArea !== "seating") {
     signals.push({
       id: `scene-stays-${discoveredStays.id}`,
-      title: "A consistently occupied area was observed",
+      title: confirmedArea === "counter" ? "Repeated presence near the labeled counter" : "A consistently occupied area was observed",
       detail: `Low-movement activity was sampled around ${discoveredStays.location.toLowerCase()}. This may be one seated person, not repeat visits.`,
-      suggestion: "This may simply be seating. Check the location before treating it as a waiting or service issue.",
+      suggestion: confirmedArea === "counter"
+        ? "Check your actual counter if useful; stillness alone does not establish a waiting line or service delay."
+        : "This may simply be seating. Check the location before treating it as a waiting or service issue.",
       level: "info",
     });
   }

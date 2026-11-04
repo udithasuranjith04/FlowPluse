@@ -11,7 +11,7 @@ boxes only when a slower person-detection sample completes. The previous
 fixed 0.85-second expiry could fade a box completely between two legitimate
 AI samples, particularly when processing slow or high-resolution frames.
 
-## Behavior after this upgrade
+## Original fix (v1.0)
 
 - **Solid mint boxes** are actual detections from the latest completed AI
   sample. Their display expiry takes the observed processing FPS and measured
@@ -49,3 +49,15 @@ walking person is in each 12 FPS preview frame. Motion and occlusion cause
 box drift and occasional missed or swapped anonymous tracks. Test against
 hand-annotated authorized footage before using reported counts to guide real
 operational decisions. No raw footage needs to be saved for this adjustment.
+
+## Follow-up stability fix (v1.1 feature branch)
+
+The initial cadence-aware *opacity curve* could still visibly pulse at ~2 AI FPS.
+The updated browser presentation now holds solid green at a **steady opacity**
+between recent AI samples. If evidence is missing or delayed, it changes to a
+brief, fixed-opacity amber dashed last-seen outline and then disappears. It
+never predicts movement or increases counts. Repeated WebSocket messages for
+the same AI frame do not refresh observation age.
+
+This supersedes the original 1.8-second fade behavior **for the v1.1 browser**.
+Detailed acceptance checks: [v1.1 stable overlays](V11_STABLE_OVERLAYS_ACCEPTANCE.md).

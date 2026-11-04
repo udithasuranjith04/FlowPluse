@@ -42,3 +42,21 @@ def test_count_evaluation_reports_error_and_exact_fraction():
 def test_invalid_evaluation_data_rejected(data):
     with pytest.raises(ValueError):
         module.evaluate(data)
+
+
+def test_evaluation_can_break_down_manual_scene_conditions():
+    rows = [
+        {**row("a", "3", "3"), "scenario": "clear"},
+        {**row("b", "3", "1"), "scenario": "occluded"},
+        {**row("c", "2", "1"), "scenario": "occluded"},
+    ]
+    result = module.scenario_breakdown(rows)
+    assert result["clear"]["mae_people"] == 0
+    assert result["occluded"]["mae_people"] == 1.5
+    assert result["occluded"]["frames"] == 2
+
+
+@pytest.mark.parametrize("label", ["", "unknown", "face-recognition", "x" * 120])
+def test_scenario_breakdown_rejects_unrecognized_categories(label):
+    with pytest.raises(ValueError, match="scenario"):
+        module.scenario_breakdown([{**row("a", "1", "1"), "scenario": label}])
