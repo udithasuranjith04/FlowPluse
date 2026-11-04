@@ -1,28 +1,15 @@
 import { render, screen } from "@testing-library/react";
 import { expect, it } from "vitest";
-import { LivePreview, heldBoxOpacity, sampledBoxOpacity } from "../src/App";
+import { LivePreview } from "../src/App";
 import { CafeShift } from "../src/CafeShift";
 import type { Status } from "../src/types";
-
-it("expires sampled boxes rather than presenting an old position as live tracking", () => {
-  expect(sampledBoxOpacity(0.1)).toBeGreaterThan(0.9);
-  expect(sampledBoxOpacity(0.6)).toBeGreaterThan(0);
-  expect(sampledBoxOpacity(0.6)).toBeLessThan(0.9);
-  expect(sampledBoxOpacity(0.9)).toBeGreaterThan(0);
-  expect(sampledBoxOpacity(1.1)).toBe(0);
-  expect(sampledBoxOpacity(0.9, 2, 550)).toBeGreaterThan(0);
-  expect(sampledBoxOpacity(2.0, 0.7, 600)).toBe(0);
-  expect(sampledBoxOpacity(Number.NaN)).toBe(0);
-  expect(heldBoxOpacity(0.2, 0.5)).toBeGreaterThan(0);
-  expect(heldBoxOpacity(0.8, 0.5)).toBe(0);
-});
 
 it("keeps smooth MJPEG video while hiding overly old detection coordinates", () => {
   const stale = {
     camera_id: "local-camera-0", control_revision: 321,
     detection_target: "person", ai_state: "active", state: "LIVE", mode: "LIVE",
     preview_only: false, continuous_frames_verified: true, frame_id: "one",
-    resolution: [1280, 720], processed_frame_age_seconds: 1.6,
+    resolution: [1280, 720], processed_frame_age_seconds: 3.2,
     overlay_tracks: [{ id: "temporary", box: [0.1, 0.2, 0.3, 0.7], confidence: 0.92, held: false }],
   } as unknown as Status;
   render(<LivePreview status={stale} />);

@@ -184,6 +184,8 @@ A local, optional comparison utility can evaluate different **already installed*
 - **Interrupted-scene reset:** learned hotspot evidence is invalidated on unhealthy, stale, or out-of-order monitoring samples, rather than bridging disconnected periods.
 - **More useful *offline* accuracy checks:** an optional `scenario` column on the human-counted CSV produces separate count-error slices for clear, crowded, occluded, low-light, or other frames. No accuracy percentage is claimed until real ground truth is supplied.
 
+The [stable overlay acceptance checks](docs/V11_STABLE_OVERLAYS_ACCEPTANCE.md) explain the fix for flickering green boxes (steady confirmed positions, brief amber unverified hints).
+
 See [v1.1 validation and acceptance](docs/CAFE_V11_VALIDATION.md) and [release notes](docs/RELEASE_NOTES_V1_1.md). This version is **not** a certified counter, queue detector, or commercial guarantee.
 
 ## Portfolio release and demonstration

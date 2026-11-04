@@ -13,6 +13,8 @@ import { SceneDiscoveryPanel } from "./SceneDiscoveryPanel";
 import { deriveServiceSignals, ServiceAlertsPage, ServiceSignalList, useDesktopAlerts } from "./ServiceAlerts";
 import { StartupScreen } from "./StartupScreen";
 import { useLive } from "./useLive";
+import { emptyOverlayMemory, presentOverlays, reconcileOverlaySample } from "./overlayPresentation";
+import type { OverlayMemory } from "./overlayPresentation";
 import ZoneEditor from "./ZoneEditor";
 import type { Camera as CameraType, EventPage, Observation, Review, Status } from "./types";
 
@@ -56,68 +58,51 @@ export function ModeBadge({ mode, synthetic = false, currentSnapshot = false, lo
   return <span className={`studio-state state-${mode.toLowerCase()}`}><span className="pulse-dot"/>{label}</span>;
 }
 
-/**
- * Time-bound visual presentation of sampled AI positions (not interpolation
- * through video frames). Allow roughly two inference periods for a variable
- * model cadence, including bounded processing delay, but never hold an old
- * box indefinitely when the backend is slow or disconnected.
- */
-export function sampledBoxOpacity(
-  ageSeconds: number, processedFps = 2, processingDelayMs = 0,
-): number {
-  if (!Number.isFinite(ageSeconds) || ageSeconds < 0) return 0;
-  const cadence = Number.isFinite(processedFps) && processedFps > 0
-    ? 1 / processedFps : 0.5;
-  const delay = Number.isFinite(processingDelayMs) && processingDelayMs > 0
-    ? Math.min(0.65, processingDelayMs / 1000) : 0;
-  const expiry = Math.min(1.8, Math.max(1.0, cadence * 1.8 + delay));
-  if (ageSeconds >= expiry) return 0;
-  const fadeStart = Math.max(0.35, expiry - 0.55);
-  if (ageSeconds <= fadeStart) return 0.95;
-  return 0.95 * (expiry - ageSeconds) / (expiry - fadeStart);
-}
-
-/** A single lost sample is shown as an explicitly unverified visual hint. */
-export function heldBoxOpacity(ageSeconds: number, missedAgeSeconds: number): number {
-  const totalAge = ageSeconds + missedAgeSeconds;
-  if (!Number.isFinite(totalAge) || totalAge < 0 || totalAge >= 1.1) return 0;
-  return 0.32 * Math.min(1, (1.1 - totalAge) / 0.55);
-}
-
 export function LivePreview({ status, camera }: { status: Status | null; camera?: CameraType }) {
   const frame = useRef<HTMLDivElement>(null);
   const [overlays, setOverlays] = useState(true);
   const [retry, setRetry] = useState(0);
   const [failed, setFailed] = useState(false);
   const [renderClock, setRenderClock] = useState(() => Date.now());
+  const [overlayMemory, setOverlayMemory] = useState<OverlayMemory>(emptyOverlayMemory);
   const fresh = hasLiveFrame(status) && isPeopleSource(status);
   const smooth = fresh && status?.camera_id.startsWith("local-camera-") && status.state === "LIVE";
-  // MJPEG video and AI samples have separate clocks. The sampled overlays
-  // use a bounded, cadence-aware fade and are never a live video tracker.
+  // MJPEG video and AI samples have separate clocks. Keep last confirmed
+  // coordinates steady, then switch to a bounded unverified amber hint.
   useEffect(() => {
     if (!smooth || !overlays) return;
     const ticker = window.setInterval(() => setRenderClock(Date.now()), 100);
     return () => window.clearInterval(ticker);
   }, [smooth, overlays]);
-  const sampleTime = status?.frame_timestamp ? Date.parse(status.frame_timestamp) : NaN;
-  const sampleAge = Number.isFinite(sampleTime) && sampleTime > 0
-    ? Math.max(0, (renderClock - sampleTime) / 1000)
-    : status?.processed_frame_age_seconds ?? Infinity;
-  const boxOpacity = sampledBoxOpacity(sampleAge, status?.processed_fps, status?.processing_delay_ms ?? 0);
   const legacy = Boolean(status && (status.camera_id === "demo" || status.detection_target !== "person"));
   const width = status?.resolution?.[0] || 1280;
   const height = status?.resolution?.[1] || 720;
-  // Last-observed outlines remain strictly visual. Analytics and counts
-  // continue to use only detections in the latest processed frame.
-  const overlaySource: { id: string; box: number[]; confidence: number; held?: boolean; held_age_seconds?: number }[] =
-    status?.overlay_tracks ?? status?.tracks ?? [];
-  const boxes = smooth && overlays
-    ? overlaySource.filter((track) =>
-      (track.held ? heldBoxOpacity(sampleAge, track.held_age_seconds ?? Infinity) > 0 : boxOpacity > 0) &&
-      track.box.length === 4 &&
-      track.box.every((value) => Number.isFinite(value) && value >= 0 && value <= 1) &&
-      track.box[2] > track.box[0] && track.box[3] > track.box[1]
-    ).slice(0, 32)
+  const sourceKey = `${status?.camera_id ?? ""}:${status?.control_revision ?? 0}`;
+  const sampleKey = status?.frame_timestamp
+    ? `${status.frame_timestamp}:${status.frame_id ?? ""}` : status?.frame_id ?? "";
+  const sampleTime = status?.frame_timestamp ? Date.parse(status.frame_timestamp) : NaN;
+  const captureTime = Number.isFinite(sampleTime)
+    ? sampleTime : Date.now() - (status?.processed_frame_age_seconds ?? Infinity) * 1000;
+  // Repeated WebSocket updates of the *same* inference are not fresh evidence.
+  // The visual layer is separate from all backend counts and shift measurements.
+  useEffect(() => {
+    if (!smooth || !overlays || !status || status.last_error ||
+        !status.frame_id || status.ai_state !== "active" ||
+        (status.processed_frame_age_seconds ?? Infinity) > 3 ||
+        (status.quality_flags ?? []).some((flag) =>
+          ["camera_view_moving", "camera_movement", "frozen_input", "source_boundary", "frame_gap"].includes(flag))) {
+      setOverlayMemory(emptyOverlayMemory());
+      return;
+    }
+    setOverlayMemory((old) => reconcileOverlaySample(old, {
+      source: sourceKey, sample: sampleKey, capturedAtMs: captureTime,
+      tracks: status.overlay_tracks ?? status.tracks ?? [],
+    }, Date.now()));
+  }, [smooth, overlays, status, sourceKey, sampleKey, captureTime]);
+  const boxes = smooth && overlays && status?.ai_state === "active" && !status.last_error &&
+    (status.processed_frame_age_seconds ?? Infinity) <= 3
+    ? presentOverlays(overlayMemory.source === sourceKey ? overlayMemory : emptyOverlayMemory(),
+      renderClock, status?.processed_fps, status?.processing_delay_ms ?? 0)
     : [];
   return <section className="studio-card camera-stage" aria-label="Live camera preview">
     <div className="stage-heading"><div><span className="section-kicker">LIVE / VISION</span><h2>Camera workspace</h2></div>
@@ -132,19 +117,18 @@ export function LivePreview({ status, camera }: { status: Status | null; camera?
           alt={`Live person-detection camera ${camera?.name || status!.camera_id}`}
           onLoad={() => setFailed(false)} onError={() => setFailed(true)} />
         {boxes.length > 0 && <svg className="stage-ai-boxes" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="xMidYMid meet" aria-label="Latest sampled AI detection boxes">
-          {boxes.map((track, index) => {
+          {boxes.map((track) => {
             const [x1, y1, x2, y2] = track.box;
             const x = x1 * width;
             const y = y1 * height;
-            return <g key={track.id || index} opacity={track.held
-              ? heldBoxOpacity(sampleAge, track.held_age_seconds ?? Infinity) : boxOpacity}>
+            return <g key={track.visualId} opacity={track.state === "confirmed" ? 0.95 : 0.58}>
               <rect x={x} y={y} width={(x2 - x1) * width} height={(y2 - y1) * height}
-                fill="none" stroke={track.held ? "#f6c57c" : "#70e6d1"}
-                strokeDasharray={track.held ? "10 7" : undefined}
+                fill="none" stroke={track.state === "last-seen" ? "#f6c57c" : "#70e6d1"}
+                strokeDasharray={track.state === "last-seen" ? "10 7" : undefined}
                 strokeWidth={Math.max(2, width / 500)} />
-              <text x={x + 4} y={Math.max(18, y - 6)} fill={track.held ? "#f6d6a4" : "#c0ffed"}
+              <text x={x + 4} y={Math.max(18, y - 6)} fill={track.state === "last-seen" ? "#f6d6a4" : "#c0ffed"}
                 fontSize={Math.max(14, width / 80)} fontWeight="600">
-                {track.held ? "last seen · not verified" : "person · sampled"}
+                {track.state === "last-seen" ? "last seen · not verified" : "person · sampled"}
               </text>
             </g>;
           })}

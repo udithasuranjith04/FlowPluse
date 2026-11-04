@@ -73,6 +73,6 @@ it("shows a brief unverified dashed hint for one missed sample, not a current pe
   expect(screen.getByLabelText(/Latest sampled AI detection boxes/)).toBeInTheDocument();
   expect(screen.getByText("last seen · not verified")).toBeInTheDocument();
   expect(document.querySelector(".stage-ai-boxes rect")?.getAttribute("stroke-dasharray")).toBe("10 7");
-  ui.rerender(<LivePreview status={{ ...missed, processed_frame_age_seconds: 1.1 }} />);
+  ui.rerender(<LivePreview status={{ ...missed, processed_frame_age_seconds: 3.2 }} />);
   expect(screen.queryByText("last seen · not verified")).toBeNull();
 });
