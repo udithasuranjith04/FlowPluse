@@ -1,4 +1,5 @@
 # FlowPulse AI
+<img width="1488" height="869" alt="image" src="https://github.com/user-attachments/assets/8d8d5428-cd8e-4d35-ac91-ccc9a9cae0f1" />
 
 **Privacy-conscious people-flow analytics, running locally on your Mac.** A local camera feeds YOLO11n person detections, temporary anonymous tracking, people-in-zone estimates, entry/exit counting, and reviewable dwell/possible-queue observations to a React/FastAPI dashboard.
 
